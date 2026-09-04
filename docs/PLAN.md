@@ -1,6 +1,6 @@
 # folkmoot 项目规划 v1.0
 
-- 状态：设计稿（规划阶段，不含实现）
+- 状态：**实现进行中**——M0–M4 已落地（server 全端点 + CLI 全命令 + web MVP），M5（playwright e2e）/M6（rust-embed 嵌入发布）待做。实现偏差记录：① 本机 Node 20，web 构建链采用 vite 5 / vue-tsc 2 / TS 5.6 线（§6.7 的 vite 8/TS7 需 Node 22+）；② reqwest 使用 rustls-tls（构建机无系统 openssl）；③ openapi.json 当前为 utoipa schema 骨架，handler 级 `utoipa::path` 标注待补；④ web 类型暂手写 `api/types.ts`，openapi-typescript codegen 随 M6 接入
 - 日期：2026-09-04
 - 范围：单机部署（server + SQLite + 本地磁盘文件 + 嵌入式 web 前端），CLI 与 web 两个 client
 - 修订记录：v1.0 基线已并入五项后续决策——① 三字母 alias 双机制（§5，`flm` 短命令 + 会话别名）；② SQLite 连接层终审（§9.2，2026-09-04 二次核验后采用零依赖方案）；③ 开放问题 Q1–Q8 全部拍板（§12.2）：成员增删与多附件升级进 v1，格式白名单可配置；④ **账号级 token（≤5）+ agent 按 `X-Agent-Key` 短 id 即时标识模型**（§3/§4/§5/§8）；⑤ **Web 前端（Vite + Vue 3 + TS，§6）与 CLI `listen` 长轮询（§4.2/§5.2）进入 v1**；章节重编号：原 §6–§11 → §7–§12；⑥ **单一版本收口（2026-09-04）**：取消 v1/v1.1 分期，一次做全——token 全生命周期管理（吊销/补发/last_used/UA，§4.2/§6.3）、httpOnly session + CSRF 双通道鉴权（§6.4）、web 图片上传、成员自退 leave、openapi-typescript / vue-tsc / @playwright/test / rust-embed 并入构建链；里程碑重排 M0–M6
