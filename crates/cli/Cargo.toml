@@ -21,3 +21,6 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
 rand = { workspace = true }
+toml = "0.8"
+chrono = { workspace = true }
+futures-util = "0.3"

@@ -90,42 +90,36 @@ pub fn list(
         args.push(pos.id.clone());
     }
 
-    // before 翻页：先倒序取 limit 条再反转升序；after/默认：直接升序
+    // 默认（无游标）= 最新一页：倒序取再反转；before = 向更旧翻页；after = 取新增量
     let fetch = limit + 1;
-    let rows: Vec<(String, String, String, String, Option<String>, String)> = if before.is_some() {
-        let idx = args.len() + 1;
-        let q = format!("{sql} ORDER BY m.created_at DESC, m.id DESC LIMIT ?{idx}");
-        args.push(fetch.to_string());
-        let mut stmt = conn.prepare(&q)?;
-        let mut v = stmt
-            .query_map(rusqlite::params_from_iter(args), |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        v.reverse();
-        v
-    } else {
-        let idx = args.len() + 1;
-        let q = format!("{sql} ORDER BY m.created_at ASC, m.id ASC LIMIT ?{idx}");
-        args.push(fetch.to_string());
-        let mut stmt = conn.prepare(&q)?;
-        let v = stmt.query_map(rusqlite::params_from_iter(args), |r| {
+    let descending = after.is_none();
+    let idx = args.len() + 1;
+    let order = if descending { "DESC" } else { "ASC" };
+    let q = format!("{sql} ORDER BY m.created_at {order}, m.id {order} LIMIT ?{idx}");
+    args.push(fetch.to_string());
+    let mut stmt = conn.prepare(&q)?;
+    let mut rows: Vec<(String, String, String, String, Option<String>, String)> = stmt
+        .query_map(rusqlite::params_from_iter(args), |r| {
             Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))
         })?
         .collect::<Result<Vec<_>, _>>()?;
-        v
-    };
+    if descending {
+        rows.reverse();
+    }
 
     let has_more = rows.len() as u32 > limit;
+    // 多余一条用于探测 has_more：descending 模式下最旧的在头部，ascending 在尾部
     let rows = if has_more {
-        rows[..limit as usize].to_vec()
+        if descending {
+            rows[rows.len() - limit as usize..].to_vec()
+        } else {
+            rows[..limit as usize].to_vec()
+        }
     } else {
         rows
     };
-    // next_cursor = 本页最旧一条（before 翻页继续向更旧）；after 模式无更旧方向，给 None
-    let next_cursor = if before.is_some() && has_more {
-        rows.first().map(|r| r.0.clone())
-    } else if before.is_none() && after.is_none() && has_more {
+    // next_cursor = 本页最旧一条（before/默认页继续向更旧）；after 增量模式为 None
+    let next_cursor = if after.is_none() && has_more {
         rows.first().map(|r| r.0.clone())
     } else {
         None
@@ -161,4 +155,58 @@ pub fn latest_id(conn: &Connection, conv_id: &str) -> Result<Option<String>, Api
 
 pub fn attachments_for(conn: &Connection, message_id: &str) -> Result<Vec<AttachmentInfo>, ApiError> {
     super::attachments::list_for_message(conn, message_id)
+}
+
+#[cfg(test)]
+mod tests {
+    //! 分页语义：默认=最新一页、before 向更旧、after 取新增量（§3.4）
+    use crate::db::{agents, conversations, messages, Db};
+    use folkmoot_common::ConversationKind;
+
+    fn fixture(n: u32) -> (rusqlite::Connection, String, String) {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::migrations::migrate(&conn).unwrap();
+        let acc = crate::db::accounts::create(&conn, "t").unwrap();
+        let a1 = agents::upsert(&conn, &acc.id, "a1").unwrap();
+        let a2 = agents::upsert(&conn, &acc.id, "a2").unwrap();
+        let conv = conversations::create(&conn, ConversationKind::Group, None, None, &a1.id, &[a1.id.clone(), a2.id.clone()]).unwrap();
+        for i in 0..n {
+            let (id, ts) = messages::insert(&conn, &conv.id, &a1.id, Some(&format!("m{i}"))).unwrap();
+            // 保证 created_at 严格递增（毫秒精度下同毫秒内靠 id tie-break，测试强制拉开）
+            conn.execute("UPDATE messages SET created_at = ?1 WHERE id = ?2", rusqlite::params![
+                crate::db::accounts::fmt_dt(&(chrono::DateTime::from_timestamp_millis(1_700_000_000_000 + i as i64 * 1000).unwrap())),
+                id,
+            ]).unwrap();
+            let _ = ts;
+        }
+        (conn, conv.id, a1.id)
+    }
+
+    #[test]
+    fn default_page_is_latest() {
+        let (conn, conv, _a) = fixture(5);
+        let (items, next) = messages::list(&conn, &conv, 2, None, None).unwrap();
+        assert_eq!(items.iter().map(|m| m.text.clone().unwrap()).collect::<Vec<_>>(), ["m3", "m4"]);
+        assert!(next.is_some());
+        // 继续向更旧翻页
+        let (older, next2) = messages::list(&conn, &conv, 2, next.as_deref(), None).unwrap();
+        assert_eq!(older.iter().map(|m| m.text.clone().unwrap()).collect::<Vec<_>>(), ["m1", "m2"]);
+        let (oldest, next3) = messages::list(&conn, &conv, 2, next2.as_deref(), None).unwrap();
+        assert_eq!(oldest.len(), 1);
+        assert!(next3.is_none());
+    }
+
+    #[test]
+    fn after_returns_newer_only() {
+        let (conn, conv, _a) = fixture(3);
+        let (items, _) = messages::list(&conn, &conv, 1, None, None).unwrap();
+        let latest = &items[0];
+        let (newer, next) = messages::list(&conn, &conv, 50, None, Some(&latest.id)).unwrap();
+        assert!(newer.is_empty());
+        assert!(next.is_none());
+        // after 第一条 → 其余两条
+        let (all, _) = messages::list(&conn, &conv, 50, None, None).unwrap();
+        let (rest, _) = messages::list(&conn, &conv, 50, None, Some(&all[0].id)).unwrap();
+        assert_eq!(rest.len(), 2);
+    }
 }

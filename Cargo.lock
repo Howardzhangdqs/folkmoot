@@ -487,16 +487,19 @@ name = "folkmoot"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "comfy-table",
  "dirs",
  "folkmoot-common",
+ "futures-util",
  "rand 0.9.5",
  "reqwest",
  "serde",
  "serde_json",
  "thiserror",
  "tokio",
+ "toml",
  "uuid",
 ]
 
