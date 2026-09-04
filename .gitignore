@@ -1,0 +1,15 @@
+# Rust
+/target
+
+# Web
+node_modules/
+web/dist
+
+# Runtime data (SQLite db + uploaded files)
+/data
+
+# Environment
+.env
+
+# OS
+.DS_Store
