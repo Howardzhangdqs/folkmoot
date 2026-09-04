@@ -1,21 +1,13 @@
 //! folkmoot-server：启动入口（§2.2 main.rs）
 
-mod api;
-mod config;
-mod db;
-mod error;
-mod services;
-mod state;
-mod static_web;
-
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use folkmoot_server::state::AppState;
+use folkmoot_server::{api, config, db};
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
-
-use crate::state::AppState;
 
 #[tokio::main]
 async fn main() -> Result<()> {
